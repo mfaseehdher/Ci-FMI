@@ -1,0 +1,109 @@
+# ============================================================
+# validate_fmus.yml
+# GitHub Actions CI/CD Pipeline for FMU Co-Simulation
+#
+# Repository: github.com/mfaseehdher/ci-fmi
+#
+# What this does:
+#   Stage 1 (matlab_export):
+#     - Finds all .slx files in experiments/ folder
+#     - Runs each Simulink model -> saves reference CSV
+#     - Exports each model as FMU
+#     - Generates experiment JSON automatically
+#
+#   Stage 2 (python_validate):
+#     - Finds all experiment folders automatically
+#     - Runs each FMU via generic.py -> results CSV
+#     - Compares results vs reference via compare.py
+#     - Generates plots via plot_results.py
+#     - Reports PASS/FAIL per model and overall verdict
+#
+# Trigger:
+#   - Every push to main branch
+#   - Every pull request to main
+#   - Manual trigger from GitHub Actions tab
+#
+# Runner:
+#   - self-hosted (your laptop)
+#   - MATLAB must be installed on your laptop
+#   - Python must be installed on your laptop
+# ============================================================
+
+name: FMU Co-Simulation Validation
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
+  workflow_dispatch:          # allows manual trigger from GitHub UI
+
+jobs:
+
+  # ── Stage 1: MATLAB ─────────────────────────────────────────
+  matlab_export:
+    name: MATLAB Export (Run Simulink + Export FMU)
+    runs-on: self-hosted      # your laptop registered as runner
+
+    steps:
+
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Run MATLAB export script
+        run: |
+          matlab -batch "run_all_exports('experiments')"
+
+      - name: Upload FMUs and reference CSVs
+        uses: actions/upload-artifact@v4
+        with:
+          name: matlab-outputs
+          path: |
+            experiments/**/*.fmu
+            experiments/**/*_ref.csv
+            experiments/**/*.json
+          retention-days: 1
+
+  # ── Stage 2: Python ─────────────────────────────────────────
+  python_validate:
+    name: Python Validation (Run FMU + Compare + Plot)
+    runs-on: self-hosted
+    needs: matlab_export      # wait for Stage 1 to finish
+
+    steps:
+
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Download MATLAB outputs
+        uses: actions/download-artifact@v4
+        with:
+          name: matlab-outputs
+          path: experiments/
+
+      - name: Install Python dependencies
+        run: |
+          pip install fmpy networkx matplotlib dtaidistance --quiet
+
+      - name: Run all experiments
+        run: |
+          python run_all_experiments.py \
+            --experiments experiments \
+            --tol 0.01 \
+            --plots-dir plots
+
+      - name: Upload plots
+        uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: validation-plots
+          path: plots/
+          retention-days: 30
+
+      - name: Upload result CSVs
+        uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: result-csvs
+          path: experiments/**/results_*.csv
+          retention-days: 30
