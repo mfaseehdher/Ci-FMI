@@ -1,6 +1,6 @@
 % setup_aircraft_pitch.m
 % Place in: experiments/control/aircraft_pitch/
-% Model file: aircraft_pitch_control.slx
+% NOTE: aircraft_pitch_control has NO root input port
 
 model = 'aircraft_pitch_control';
 
@@ -19,11 +19,11 @@ u = 0.2 * ones(size(t));
 assignin('base', 't', t);
 assignin('base', 'u', u);
 
-set_param(model, 'SolverType',        'Fixed-step');
-set_param(model, 'Solver',            'ode4');
-set_param(model, 'FixedStep',         '0.001');
-set_param(model, 'StopTime',          num2str(t_stop));
-set_param(model, 'LoadExternalInput', 'on');
-set_param(model, 'ExternalInput',     '[t, u]');
+% Configure solver - NO LoadExternalInput
+set_param(model, 'SolverType', 'Fixed-step');
+set_param(model, 'Solver',     'ode4');
+set_param(model, 'FixedStep',  '0.001');
+set_param(model, 'StopTime',   num2str(t_stop));
 save_system(model);
-fprintf('  Aircraft pitch workspace ready\n');
+
+fprintf('  Aircraft pitch setup done\n');
