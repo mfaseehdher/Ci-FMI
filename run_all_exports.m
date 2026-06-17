@@ -1,12 +1,7 @@
 function run_all_exports(experiments_dir)
 % RUN_ALL_EXPORTS
-% Finds all .slx files in experiments directory and for each model:
-%   1. Runs setup .m file to set workspace variables
-%   2. Runs simulation -> saves reference CSV
-%   3. Exports FMU
-%   4. Generates experiment JSON
-%
-% Usage: matlab -batch "run_all_exports('experiments')"
+% For each .slx model: run setup, simulate, save reference CSV, export FMU, write JSON.
+% Matches the approach of the original working per-model scripts.
 
 if nargin < 1
     experiments_dir = 'experiments';
@@ -14,7 +9,6 @@ end
 
 fprintf('================================================\n');
 fprintf('  MATLAB Export Pipeline\n');
-fprintf('  Looking in: %s\n', experiments_dir);
 fprintf('================================================\n\n');
 
 slx_files = dir(fullfile(experiments_dir, '**', '*.slx'));
@@ -37,6 +31,8 @@ for i = 1:numel(slx_files)
         failed{end+1} = model_name;
         fprintf('[%s] FAILED: %s\n\n', model_name, e.message);
     end
+    % Clean base workspace between models to prevent leakage
+    evalin('base', 'clear t u m b K J R L A B C D M1 M2 K1 K2 b1 b2 g d');
 end
 
 fprintf('================================================\n');
@@ -57,52 +53,62 @@ original_dir = pwd;
 cd(model_dir);
 
 try
-    % Step 0: Load model first so setup scripts can configure it
-    fprintf('  [0/4] Pre-loading model...\n');
-    load_system(model_name);
-
-    % Step 1: Run setup .m file if it exists
+    % Run the setup script for THIS model only.
+    % Each folder must contain exactly ONE setup_*.m file.
+    % If multiple exist (stale files), this is an error.
     setup_files = dir('setup_*.m');
-    if ~isempty(setup_files)
-        for i = 1:numel(setup_files)
-            setup_name = erase(setup_files(i).name, '.m');
-            fprintf('  [1/4] Running setup: %s\n', setup_files(i).name);
-            try
-                run(setup_name);
-                fprintf('     Setup complete\n');
-            catch e
-                fprintf('     Setup warning: %s\n', e.message);
-            end
-        end
-    else
-        fprintf('  [1/4] No setup script found - using model defaults\n');
+    if isempty(setup_files)
+        error('No setup_*.m found in %s', model_dir);
     end
-
-    % Get timing info
-    stop_time = str2double(get_param(model_name, 'StopTime'));
-    dt_str    = get_param(model_name, 'FixedStep');
-    if strcmp(dt_str, 'auto') || isnan(str2double(dt_str))
-        dt = 0.01;
-    else
-        dt = str2double(dt_str);
+    if numel(setup_files) > 1
+        names = strjoin({setup_files.name}, ', ');
+        error(['Multiple setup files found in %s: %s\n' ...
+               'Each model folder must have exactly ONE setup file.'], ...
+               model_dir, names);
     end
-    fprintf('     Stop: %gs  Step: %gs\n', stop_time, dt);
+    setup_name = erase(setup_files(1).name, '.m');
+    fprintf('  [1/4] Running setup: %s\n', setup_files(1).name);
+    run(setup_name);
 
-    % Step 2: Run simulation
+    % Simulation -- model is already loaded and configured by setup.
+    % Use plain sim() so tout/yout land in base workspace,
+    % exactly like the original working scripts.
     fprintf('  [2/4] Running simulation...\n');
-    simOut  = sim(model_name, 'ReturnWorkspaceOutputs', 'on');
-    ref_csv = sprintf('%s_ref.csv', model_name);
-    save_reference_csv(simOut, ref_csv, model_name);
-    fprintf('     Reference saved: %s\n', ref_csv);
+    sim(model_name);
 
-    % Step 3: Export FMU
+    % Extract from base workspace (set by sim)
+    t_out = evalin('base', 'tout');
+    raw   = evalin('base', 'yout');
+
+    if isa(raw, 'Simulink.SimulationData.Dataset')
+        out = raw{1}.Values.Data(:);
+    elseif isnumeric(raw)
+        out = raw(:, 1);
+    else
+        error('Unrecognized yout type');
+    end
+
+    % Save reference CSV
+    ref_csv = sprintf('%s_ref.csv', model_name);
+    min_len = min(length(t_out), length(out));
+    fid = fopen(ref_csv, 'w');
+    fprintf(fid, 'time,output\r\n');
+    for row = 1:min_len
+        fprintf(fid, '%.10f,%.10f\r\n', t_out(row), out(row));
+    end
+    fclose(fid);
+    fprintf('     Reference saved: %s (%d rows)\n', ref_csv, min_len);
+
+    % Export FMU
     fprintf('  [3/4] Exporting FMU...\n');
     exportToFMU2CS(model_name, 'SaveDirectory', model_dir);
     fprintf('     FMU exported\n');
 
-    % Step 4: Generate JSON
+    % Generate JSON
     fprintf('  [4/4] Generating JSON...\n');
-    generate_json(model_name, model_dir, stop_time, dt, ref_csv);
+    stop_time = str2double(get_param(model_name, 'StopTime'));
+    dt        = 0.01;
+    generate_json(model_name, model_dir, stop_time, dt);
     fprintf('     JSON generated\n');
 
     close_system(model_name, 0);
@@ -118,158 +124,23 @@ end
 
 
 % =============================================================
-function save_reference_csv(simOut, csv_path, model_name)
-% Handles all MATLAB output formats:
-%   Format A: logsout (Signal Logging enabled in Simulink)
-%   Format B: yout as Simulink.SimulationData.Dataset (modern)
-%   Format C: yout as plain matrix (older MATLAB)
+function generate_json(model_name, model_dir, stop_time, dt)
 
-% ── Format A: logsout ────────────────────────────────────────
-try
-    if isprop(simOut, 'logsout') && ~isempty(simOut.logsout)
-        logs  = simOut.logsout;
-        names = logs.getElementNames();
-        if ~isempty(names)
-            first = logs.getElement(names{1});
-            time  = first.Values.Time(:);
-            fid   = fopen(csv_path, 'w');
-            fprintf(fid, 'time');
-            for k = 1:numel(names)
-                fprintf(fid, ',%s', names{k});
-            end
-            fprintf(fid, '\r\n');
-            for row = 1:length(time)
-                fprintf(fid, '%.10f', time(row));
-                for k = 1:numel(names)
-                    sig = logs.getElement(names{k});
-                    val = sig.Values.Data(row);
-                    fprintf(fid, ',%.10f', val);
-                end
-                fprintf(fid, '\r\n');
-            end
-            fclose(fid);
-            fprintf('     Format A: %d signals, %d rows\n', numel(names), length(time));
-            return
-        end
-    end
-catch e
-    fprintf('     Format A failed: %s\n', e.message);
-end
-
-% ── Format B/C: yout ─────────────────────────────────────────
-try
-    % Get time
-    if isprop(simOut, 'tout') && ~isempty(simOut.tout)
-        time = simOut.tout(:);
-    else
-        error('No time data in simOut');
-    end
-
-    % Get output
-    if ~isprop(simOut, 'yout') || isempty(simOut.yout)
-        error('No yout in simOut');
-    end
-
-    raw = simOut.yout;
-
-    % Handle Dataset format (modern MATLAB)
-    % Uses yout{1}.Values.Data -- same as working old .m scripts
-    if isa(raw, 'Simulink.SimulationData.Dataset')
-        elem     = raw{1};              % first signal (same as yout{1})
-        data     = elem.Values.Data(:); % same as yout{1}.Values.Data
-        time     = elem.Values.Time(:);
-        % Try to get signal name
-        try
-            names    = raw.getElementNames();
-            col_name = names{1};
-        catch
-            col_name = 'y';
-        end
-        fprintf('     Format B: Dataset yout{1}.Values.Data, col=%s\n', col_name);
-    else
-        % Plain matrix (older MATLAB)
-        data     = raw(:, 1);
-        col_name = 'y';
-        fprintf('     Format C: plain matrix\n');
-    end
-
-    % Write CSV
-    min_len = min(length(time), length(data));
-    fid = fopen(csv_path, 'w');
-    fprintf(fid, 'time,%s\r\n', col_name);
-    for row = 1:min_len
-        fprintf(fid, '%.10f,%.10f\r\n', time(row), data(row));
-    end
-    fclose(fid);
-    fprintf('     Saved %d rows\n', min_len);
-    return
-
-catch e
-    fprintf('     Format B/C failed: %s\n', e.message);
-end
-
-% ── All formats failed ────────────────────────────────────────
-error(['Could not save reference CSV for %s.\n' ...
-       'Please enable Signal Logging in Simulink:\n' ...
-       '  Right-click output signal wire -> Log Selected Signals'], ...
-       model_name);
-end
-
-
-% =============================================================
-function generate_json(model_name, model_dir, stop_time, dt, ref_csv)
-
-step_blocks = find_system(model_name, 'BlockType', 'Step');
-sine_blocks = find_system(model_name, 'BlockType', 'SineWave');
-ramp_blocks = find_system(model_name, 'BlockType', 'Ramp');
-out_blocks  = find_system(model_name, 'BlockType', 'Outport');
+out_blocks = find_system(model_name, 'BlockType', 'Outport');
+in_blocks  = find_system(model_name, 'BlockType', 'Inport');
 
 components  = struct();
 connections = {};
 
-% Step blocks
-if ~isempty(step_blocks)
+% Use a step source feeding each inport (input was [t,u] = constant)
+if ~isempty(in_blocks)
     ports = struct();
-    for i = 1:numel(step_blocks)
-        pname = clean_name(get_param(step_blocks{i}, 'Name'));
-        try
-            iv  = str2double(get_param(step_blocks{i}, 'Before'));
-            sv  = str2double(get_param(step_blocks{i}, 'After'));
-            st  = str2double(get_param(step_blocks{i}, 'Time'));
-            if isnan(iv), iv = 0; end
-            if isnan(sv), sv = 1; end
-            if isnan(st), st = 0; end
-        catch
-            iv = 0; sv = 1; st = 0;
-        end
-        ports.(pname) = struct('initial', iv, 'step', sv, 'step_time', st);
-        connections{end+1} = conn('step_source', pname, 'fmu', pname);
+    for i = 1:numel(in_blocks)
+        pname = clean_name(get_param(in_blocks{i}, 'Name'));
+        ports.(pname) = struct('initial', 0, 'step', 1, 'step_time', 0);
+        connections{end+1} = conn('stim', pname, 'fmu', pname);
     end
-    components.step_source = struct('type', 'step', 'ports', ports);
-end
-
-% Sine blocks
-if ~isempty(sine_blocks)
-    ports = struct();
-    for i = 1:numel(sine_blocks)
-        pname = clean_name(get_param(sine_blocks{i}, 'Name'));
-        try
-            amp  = str2double(get_param(sine_blocks{i}, 'Amplitude'));
-            freq = str2double(get_param(sine_blocks{i}, 'Frequency'));
-            ph   = str2double(get_param(sine_blocks{i}, 'Phase'));
-            bi   = str2double(get_param(sine_blocks{i}, 'Bias'));
-            if isnan(amp),  amp  = 1; end
-            if isnan(freq), freq = 1; end
-            if isnan(ph),   ph   = 0; end
-            if isnan(bi),   bi   = 0; end
-        catch
-            amp = 1; freq = 1; ph = 0; bi = 0;
-        end
-        ports.(pname) = struct('amplitude', amp, 'frequency', freq/(2*pi), ...
-                               'phase', ph, 'bias', bi);
-        connections{end+1} = conn('sine_source', pname, 'fmu', pname);
-    end
-    components.sine_source = struct('type', 'sine', 'ports', ports);
+    components.stim = struct('type', 'step', 'ports', ports);
 end
 
 % FMU
@@ -281,10 +152,9 @@ else
 end
 components.fmu = struct('type', 'fmu', 'file', fmu_file);
 
-% Logger - use same signal names as reference CSV
-[~, ref_name, ~] = fileparts(ref_csv);
-results_file = sprintf('results_%s.csv', model_name);
-components.log = struct('type', 'logger', 'file', results_file);
+% Logger
+components.log = struct('type', 'logger', ...
+    'file', sprintf('results_%s.csv', model_name));
 
 % Wire outputs to logger
 for i = 1:numel(out_blocks)
@@ -292,7 +162,6 @@ for i = 1:numel(out_blocks)
     connections{end+1} = conn('fmu', pname, 'log', pname);
 end
 
-% Write JSON
 experiment             = struct();
 experiment.start       = 0.0;
 experiment.stop        = stop_time;
