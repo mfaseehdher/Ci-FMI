@@ -1,29 +1,20 @@
-% setup_aircraft_pitch.m
-% Place in: experiments/control/aircraft_pitch/
-% NOTE: aircraft_pitch_control has NO root input port
+% setup_cruise_control.m -- based on working cruise_control_export_and_reference.m
+model = 'ccmodel';
 
-model = 'aircraft_pitch_control';
+m = 1000;  b = 50;
+assignin('base', 'm', m);
+assignin('base', 'b', b);
 
-A = [-0.313  56.7   0; -0.0139 -0.426 0; 0 56.7 0];
-B = [0.232; 0.0203; 0];
-C = [0 0 1];
-D = [0];
-K = [-0.6435 169.6950 7.0711];
-assignin('base', 'A', A); assignin('base', 'B', B);
-assignin('base', 'C', C); assignin('base', 'D', D);
-assignin('base', 'K', K);
-
-t_stop = 10;
-t = (0 : 0.001 : t_stop)';
-u = 0.2 * ones(size(t));
+t_stop = 120;  dt_sim = 0.001;
+t = (0 : dt_sim : t_stop)';
+u = 500 * ones(size(t));
 assignin('base', 't', t);
 assignin('base', 'u', u);
 
-% Configure solver - NO LoadExternalInput
+load_system(model);
 set_param(model, 'SolverType', 'Fixed-step');
 set_param(model, 'Solver',     'ode4');
 set_param(model, 'FixedStep',  '0.001');
 set_param(model, 'StopTime',   num2str(t_stop));
 save_system(model);
-
-fprintf('  Aircraft pitch setup done\n');
+fprintf('  Cruise control workspace ready\n');
