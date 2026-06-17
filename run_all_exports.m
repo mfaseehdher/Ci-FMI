@@ -97,9 +97,7 @@ try
 
     % Step 3: Export FMU
     fprintf('  [3/4] Exporting FMU...\n');
-    exportToFMU2CS(model_name, ...
-        'SaveDirectory',         model_dir, ...
-        'SolverForCoSimulation', 'FixedStepAuto');
+    exportToFMU2CS(model_name, 'SaveDirectory', model_dir);
     fprintf('     FMU exported\n');
 
     % Step 4: Generate JSON
@@ -175,24 +173,21 @@ try
     raw = simOut.yout;
 
     % Handle Dataset format (modern MATLAB)
+    % Uses yout{1}.Values.Data -- same as working old .m scripts
     if isa(raw, 'Simulink.SimulationData.Dataset')
-        names = raw.getElementNames();
-        if ~isempty(names)
-            % Named elements
+        elem     = raw{1};              % first signal (same as yout{1})
+        data     = elem.Values.Data(:); % same as yout{1}.Values.Data
+        time     = elem.Values.Time(:);
+        % Try to get signal name
+        try
+            names    = raw.getElementNames();
             col_name = names{1};
-            elem     = raw.getElement(names{1});
-            data     = elem.Values.Data(:);
-            time     = elem.Values.Time(:);
-        else
-            % Unnamed - use index
-            elem     = raw{1};
+        catch
             col_name = 'y';
-            data     = elem.Values.Data(:);
-            time     = elem.Values.Time(:);
         end
-        fprintf('     Format B: Dataset "%s"\n', col_name);
+        fprintf('     Format B: Dataset yout{1}.Values.Data, col=%s\n', col_name);
     else
-        % Plain matrix
+        % Plain matrix (older MATLAB)
         data     = raw(:, 1);
         col_name = 'y';
         fprintf('     Format C: plain matrix\n');
