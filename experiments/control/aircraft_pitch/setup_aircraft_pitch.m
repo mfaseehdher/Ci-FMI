@@ -1,7 +1,4 @@
 % setup_aircraft_pitch.m
-% Place in: experiments/control/aircraft_pitch/
-% NOTE: aircraft_pitch_control has NO root input port
-
 model = 'aircraft_pitch_control';
 
 A = [-0.313  56.7   0; -0.0139 -0.426 0; 0 56.7 0];
@@ -19,7 +16,6 @@ u = 0.2 * ones(size(t));
 assignin('base', 't', t);
 assignin('base', 'u', u);
 
-% Configure solver - NO LoadExternalInput
 set_param(model, 'SolverType', 'Fixed-step');
 set_param(model, 'Solver',     'ode4');
 set_param(model, 'FixedStep',  '0.001');
