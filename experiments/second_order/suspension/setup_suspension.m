@@ -1,4 +1,4 @@
-% setup_suspension.m -- based on working suspension_export_and_reference.m
+% setup_suspension.m
 model = 'suspmod';
 
 M1 = 2500;  M2 = 320;
@@ -22,4 +22,17 @@ set_param(model,'StopTime',num2str(t_stop));
 set_param(model,'LoadExternalInput','on');
 set_param(model,'ExternalInput','[t, u]');
 save_system(model);
+
+sim(model);
+
+t_out  = tout;
+out    = yout{1}.Values.Data(:);
+
+fid = fopen('suspmod_ref.csv', 'w');
+fprintf(fid, 'time,BodyDisplacement\r\n');
+for i = 1:length(t_out)
+    fprintf(fid, '%.10f,%.10f\r\n', t_out(i), out(i));
+end
+fclose(fid);
 fprintf('  Suspension workspace ready\n');
+fprintf('  Reference saved: suspmod_ref.csv (%d rows)\n', length(t_out));
