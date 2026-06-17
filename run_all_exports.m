@@ -1,9 +1,13 @@
 function run_all_exports(experiments_dir)
 % RUN_ALL_EXPORTS
-% For each .slx model: run its setup_*.m (which loads model, sets params,
-% configures solver), then simulate, save reference CSV, export FMU, write JSON.
+% Finds all .slx files and for each model:
+%   1. Changes to model directory
+%   2. Runs setup_*.m which loads model, sets params, runs sim, saves CSV
+%   3. Exports FMU
+%   4. Generates JSON
 %
-% The setup_*.m files are based on the original working per-model scripts.
+% The setup files handle everything up to and including simulation.
+% This function handles FMU export and JSON generation.
 
 if nargin < 1
     experiments_dir = 'experiments';
@@ -53,43 +57,32 @@ original_dir = pwd;
 cd(model_dir);
 
 try
-    % Run the setup script for this model.
-    % Setup loads the model, sets parameters, configures solver.
+    % Find and run setup script
     setup_files = dir('setup_*.m');
     if isempty(setup_files)
         error('No setup_*.m found in %s', model_dir);
     end
-    setup_name = erase(setup_files(1).name, '.m');
+
+    % Run setup as script in base workspace using evalin
+    % This ensures tout/yout land in base workspace (same as running script)
+    setup_script = fullfile(model_dir, setup_files(1).name);
     fprintf('  [1/4] Running setup: %s\n', setup_files(1).name);
-    run(setup_name);
+    evalin('base', sprintf("run('%s')", strrep(setup_script, '\', '\\')));
 
-    % Run simulation. Model is configured to write tout/yout to base workspace.
-    fprintf('  [2/4] Running simulation...\n');
-    sim(model_name);
-
-    % Extract output from base workspace (same as working scripts)
-    t_out = evalin('base', 'tout');
-    raw   = evalin('base', 'yout');
-
-    if isa(raw, 'Simulink.SimulationData.Dataset')
-        out = raw{1}.Values.Data(:);
-    elseif isnumeric(raw)
-        out = raw(:, 1);
+    % Get reference CSV name from base workspace
+    % The setup script should have saved a reference CSV already
+    % Check if it exists
+    csv_files = dir('*_ref.csv');
+    if ~isempty(csv_files)
+        fprintf('     Reference CSV found: %s\n', csv_files(1).name);
+        ref_csv = csv_files(1).name;
     else
-        error('Unrecognized yout type: %s', class(raw));
+        % Setup did not save CSV - do it here using simOut
+        fprintf('  [2/4] Running simulation for reference...\n');
+        simOut  = sim(model_name, 'ReturnWorkspaceOutputs', 'on');
+        ref_csv = save_reference_csv(simOut, model_name);
+        fprintf('     Reference saved: %s\n', ref_csv);
     end
-    t_out = t_out(:);
-
-    % Save reference CSV
-    ref_csv = sprintf('%s_ref.csv', model_name);
-    n = min(length(t_out), length(out));
-    fid = fopen(ref_csv, 'w');
-    fprintf(fid, 'time,output\r\n');
-    for row = 1:n
-        fprintf(fid, '%.10f,%.10f\r\n', t_out(row), out(row));
-    end
-    fclose(fid);
-    fprintf('     Reference saved: %s (%d rows)\n', ref_csv, n);
 
     % Export FMU
     fprintf('  [3/4] Exporting FMU...\n');
@@ -104,9 +97,6 @@ try
 
     close_system(model_name, 0);
 
-    % Clear workspace variables to prevent leakage into next model
-    evalin('base', 'clear t u tout yout m b K J R L A B C D M1 M2 K1 K2 b1 b2 g d');
-
 catch e
     try, close_system(model_name, 0); catch, end
     cd(original_dir);
@@ -114,6 +104,33 @@ catch e
 end
 
 cd(original_dir);
+end
+
+
+% =============================================================
+function ref_csv = save_reference_csv(simOut, model_name)
+
+ref_csv = sprintf('%s_ref.csv', model_name);
+
+try
+    raw  = simOut.yout;
+    time = simOut.tout(:);
+    if isa(raw, 'Simulink.SimulationData.Dataset')
+        out = raw{1}.Values.Data(:);
+    else
+        out = raw(:,1);
+    end
+    n   = min(length(time), length(out));
+    fid = fopen(ref_csv, 'w');
+    fprintf(fid, 'time,output\r\n');
+    for row = 1:n
+        fprintf(fid, '%.10f,%.10f\r\n', time(row), out(row));
+    end
+    fclose(fid);
+    fprintf('     Saved %d rows\n', n);
+catch e
+    error('Cannot save reference CSV: %s', e.message);
+end
 end
 
 
@@ -126,7 +143,6 @@ in_blocks  = find_system(model_name, 'BlockType', 'Inport');
 components  = struct();
 connections = {};
 
-% Step source feeding each inport
 if ~isempty(in_blocks)
     ports = struct();
     for i = 1:numel(in_blocks)
@@ -137,7 +153,6 @@ if ~isempty(in_blocks)
     components.stim = struct('type', 'step', 'ports', ports);
 end
 
-% FMU
 fmu_files = dir(fullfile(model_dir, '*.fmu'));
 if ~isempty(fmu_files)
     fmu_file = fmu_files(1).name;
@@ -145,12 +160,9 @@ else
     fmu_file = sprintf('%s.fmu', model_name);
 end
 components.fmu = struct('type', 'fmu', 'file', fmu_file);
-
-% Logger
 components.log = struct('type', 'logger', ...
     'file', sprintf('results_%s.csv', model_name));
 
-% Wire outputs to logger
 for i = 1:numel(out_blocks)
     pname = clean_name(get_param(out_blocks{i}, 'Name'));
     connections{end+1} = conn('fmu', pname, 'log', pname);
