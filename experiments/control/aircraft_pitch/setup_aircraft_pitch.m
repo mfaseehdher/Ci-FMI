@@ -1,5 +1,6 @@
-% setup_aircraft_pitch.m -- based on working aircraft_pitch_export_and_reference.m
-% NOTE: model file is aircraft_pitch_control.slx (renamed from pitch_control)
+% setup_aircraft_pitch.m
+% NOTE: model file is aircraft_pitch_control.slx
+% Old script used 'pitch_control' - now using correct name
 model = 'aircraft_pitch_control';
 
 A = [-0.313  56.7   0;
@@ -27,4 +28,17 @@ set_param(model,'StopTime',num2str(t_stop));
 set_param(model,'LoadExternalInput','on');
 set_param(model,'ExternalInput','[t, u]');
 save_system(model);
+
+sim(model);
+
+t_out = tout;
+out   = yout{1}.Values.Data(:);
+
+fid = fopen('aircraft_pitch_control_ref.csv', 'w');
+fprintf(fid, 'time,PitchAngle\r\n');
+for i = 1:length(t_out)
+    fprintf(fid, '%.10f,%.10f\r\n', t_out(i), out(i));
+end
+fclose(fid);
 fprintf('  Aircraft pitch workspace ready\n');
+fprintf('  Reference saved: aircraft_pitch_control_ref.csv (%d rows)\n', length(t_out));
