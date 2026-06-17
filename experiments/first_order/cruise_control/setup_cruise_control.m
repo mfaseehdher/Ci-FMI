@@ -1,4 +1,7 @@
-% setup_cruise_control.m -- based on working cruise_control_export_and_reference.m
+% setup_cruise_control.m
+% Exact copy of cruise_control_export_and_reference.m
+% MINUS the FMU export (run_all_exports.m handles that)
+
 model = 'ccmodel';
 
 m = 1000;  b = 50;
@@ -17,4 +20,17 @@ set_param(model, 'Solver',     'ode4');
 set_param(model, 'FixedStep',  '0.001');
 set_param(model, 'StopTime',   num2str(t_stop));
 save_system(model);
+
+sim(model);
+
+t_out   = tout;
+vel_out = yout{1}.Values.Data(:);
+
+fid = fopen('ccmodel_ref.csv', 'w');
+fprintf(fid, 'time,Velocity\r\n');
+for i = 1:length(t_out)
+    fprintf(fid, '%.10f,%.10f\r\n', t_out(i), vel_out(i));
+end
+fclose(fid);
 fprintf('  Cruise control workspace ready\n');
+fprintf('  Reference saved: ccmodel_ref.csv (%d rows)\n', length(t_out));
