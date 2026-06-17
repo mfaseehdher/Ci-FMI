@@ -1,10 +1,7 @@
-% setup_motor_speed.m
-% Place in: experiments/control/motor_speed/
-% Model file: Motor_Model.slx
-
+% setup_motor_speed.m -- based on working motor_speed_export_and_reference.m
 model = 'Motor_Model';
 
-K = 0.01; J = 0.01; b = 0.1; R = 1.0; L = 0.5;
+K = 0.01;  J = 0.01;  b = 0.1;  R = 1.0;  L = 0.5;
 assignin('base', 'K', K);
 assignin('base', 'J', J);
 assignin('base', 'b', b);
@@ -17,6 +14,7 @@ u = 1.0 * ones(size(t));
 assignin('base', 't', t);
 assignin('base', 'u', u);
 
+load_system(model);
 set_param(model, 'SolverType',        'Fixed-step');
 set_param(model, 'Solver',            'ode14x');
 set_param(model, 'FixedStep',         '0.001');
