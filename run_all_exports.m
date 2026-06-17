@@ -1,7 +1,9 @@
 function run_all_exports(experiments_dir)
 % RUN_ALL_EXPORTS
-% For each .slx model: run setup, simulate, save reference CSV, export FMU, write JSON.
-% Matches the approach of the original working per-model scripts.
+% For each .slx model: run its setup_*.m (which loads model, sets params,
+% configures solver), then simulate, save reference CSV, export FMU, write JSON.
+%
+% The setup_*.m files are based on the original working per-model scripts.
 
 if nargin < 1
     experiments_dir = 'experiments';
@@ -31,8 +33,6 @@ for i = 1:numel(slx_files)
         failed{end+1} = model_name;
         fprintf('[%s] FAILED: %s\n\n', model_name, e.message);
     end
-    % Clean base workspace between models to prevent leakage
-    evalin('base', 'clear t u m b K J R L A B C D M1 M2 K1 K2 b1 b2 g d');
 end
 
 fprintf('================================================\n');
@@ -53,30 +53,21 @@ original_dir = pwd;
 cd(model_dir);
 
 try
-    % Run the setup script for THIS model only.
-    % Each folder must contain exactly ONE setup_*.m file.
-    % If multiple exist (stale files), this is an error.
+    % Run the setup script for this model.
+    % Setup loads the model, sets parameters, configures solver.
     setup_files = dir('setup_*.m');
     if isempty(setup_files)
         error('No setup_*.m found in %s', model_dir);
-    end
-    if numel(setup_files) > 1
-        names = strjoin({setup_files.name}, ', ');
-        error(['Multiple setup files found in %s: %s\n' ...
-               'Each model folder must have exactly ONE setup file.'], ...
-               model_dir, names);
     end
     setup_name = erase(setup_files(1).name, '.m');
     fprintf('  [1/4] Running setup: %s\n', setup_files(1).name);
     run(setup_name);
 
-    % Simulation -- model is already loaded and configured by setup.
-    % Use plain sim() so tout/yout land in base workspace,
-    % exactly like the original working scripts.
+    % Run simulation. Model is configured to write tout/yout to base workspace.
     fprintf('  [2/4] Running simulation...\n');
     sim(model_name);
 
-    % Extract from base workspace (set by sim)
+    % Extract output from base workspace (same as working scripts)
     t_out = evalin('base', 'tout');
     raw   = evalin('base', 'yout');
 
@@ -85,19 +76,20 @@ try
     elseif isnumeric(raw)
         out = raw(:, 1);
     else
-        error('Unrecognized yout type');
+        error('Unrecognized yout type: %s', class(raw));
     end
+    t_out = t_out(:);
 
     % Save reference CSV
     ref_csv = sprintf('%s_ref.csv', model_name);
-    min_len = min(length(t_out), length(out));
+    n = min(length(t_out), length(out));
     fid = fopen(ref_csv, 'w');
     fprintf(fid, 'time,output\r\n');
-    for row = 1:min_len
+    for row = 1:n
         fprintf(fid, '%.10f,%.10f\r\n', t_out(row), out(row));
     end
     fclose(fid);
-    fprintf('     Reference saved: %s (%d rows)\n', ref_csv, min_len);
+    fprintf('     Reference saved: %s (%d rows)\n', ref_csv, n);
 
     % Export FMU
     fprintf('  [3/4] Exporting FMU...\n');
@@ -107,11 +99,13 @@ try
     % Generate JSON
     fprintf('  [4/4] Generating JSON...\n');
     stop_time = str2double(get_param(model_name, 'StopTime'));
-    dt        = 0.01;
-    generate_json(model_name, model_dir, stop_time, dt);
+    generate_json(model_name, model_dir, stop_time, 0.01);
     fprintf('     JSON generated\n');
 
     close_system(model_name, 0);
+
+    % Clear workspace variables to prevent leakage into next model
+    evalin('base', 'clear t u tout yout m b K J R L A B C D M1 M2 K1 K2 b1 b2 g d');
 
 catch e
     try, close_system(model_name, 0); catch, end
@@ -132,7 +126,7 @@ in_blocks  = find_system(model_name, 'BlockType', 'Inport');
 components  = struct();
 connections = {};
 
-% Use a step source feeding each inport (input was [t,u] = constant)
+% Step source feeding each inport
 if ~isempty(in_blocks)
     ports = struct();
     for i = 1:numel(in_blocks)
