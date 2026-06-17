@@ -1,7 +1,4 @@
 % setup_ball_beam.m
-% Place in: experiments/nonlinear/ball_beam/
-% Model file: ballBeam.slx (NOT ball.slx)
-
 model = 'ballBeam';
 
 m = 0.111; R = 0.015; g = -9.8;
@@ -16,7 +13,6 @@ u = 0.1 * ones(size(t));
 assignin('base', 't', t);
 assignin('base', 'u', u);
 
-% Configure solver
 set_param(model, 'SolverType', 'Fixed-step');
 set_param(model, 'Solver',     'ode14x');
 set_param(model, 'FixedStep',  '0.001');
