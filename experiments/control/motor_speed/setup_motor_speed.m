@@ -1,4 +1,4 @@
-% setup_motor_speed.m -- based on working motor_speed_export_and_reference.m
+% setup_motor_speed.m
 model = 'Motor_Model';
 
 K = 0.01;  J = 0.01;  b = 0.1;  R = 1.0;  L = 0.5;
@@ -22,4 +22,17 @@ set_param(model, 'StopTime',          num2str(t_stop));
 set_param(model, 'LoadExternalInput', 'on');
 set_param(model, 'ExternalInput',     '[t, u]');
 save_system(model);
+
+sim(model);
+
+t_out   = tout;
+spd_out = yout{1}.Values.Data(:);
+
+fid = fopen('Motor_Model_ref.csv', 'w');
+fprintf(fid, 'time,Speed\r\n');
+for i = 1:length(t_out)
+    fprintf(fid, '%.10f,%.10f\r\n', t_out(i), spd_out(i));
+end
+fclose(fid);
 fprintf('  Motor speed workspace ready\n');
+fprintf('  Reference saved: Motor_Model_ref.csv (%d rows)\n', length(t_out));
