@@ -1,6 +1,6 @@
 % setup_ball_beam.m
 % Place in: experiments/nonlinear/ball_beam/
-% Model file: ballBeam.slx
+% Model file: ballBeam.slx (NOT ball.slx)
 
 model = 'ballBeam';
 
@@ -16,11 +16,11 @@ u = 0.1 * ones(size(t));
 assignin('base', 't', t);
 assignin('base', 'u', u);
 
-set_param(model, 'SolverType',        'Fixed-step');
-set_param(model, 'Solver',            'ode14x');
-set_param(model, 'FixedStep',         '0.001');
-set_param(model, 'StopTime',          num2str(t_stop));
-set_param(model, 'LoadExternalInput', 'on');
-set_param(model, 'ExternalInput',     '[t, u]');
+% Configure solver
+set_param(model, 'SolverType', 'Fixed-step');
+set_param(model, 'Solver',     'ode14x');
+set_param(model, 'FixedStep',  '0.001');
+set_param(model, 'StopTime',   num2str(t_stop));
 save_system(model);
-fprintf('  Ball beam workspace ready\n');
+
+fprintf('  Ball beam setup done\n');
