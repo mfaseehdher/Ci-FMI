@@ -1,6 +1,6 @@
 % setup_ball_beam.m
-% NOTE: model file is ballBeam.slx but old script used 'ball'
-% Using ballBeam as that is the actual file name
+% ballBeam has an INTERNAL Step block - no external input needed
+
 model = 'ballBeam';
 
 m = 0.111;  R = 0.015;  g = -9.8;
@@ -10,30 +10,30 @@ assignin('base','g',g); assignin('base','L',L);
 assignin('base','d',d); assignin('base','J',J);
 
 t_stop = 5;
-t = (0:0.001:t_stop)';
-u = 0.1 * ones(size(t));
-assignin('base','t',t);
-assignin('base','u',u);
+assignin('base','t_stop',t_stop);
 
 load_system(model);
 set_param(model,'SolverType','Fixed-step');
 set_param(model,'Solver','ode14x');
 set_param(model,'FixedStep','0.001');
 set_param(model,'StopTime',num2str(t_stop));
-set_param(model,'LoadExternalInput','on');
-set_param(model,'ExternalInput','[t, u]');
+set_param(model,'LoadExternalInput','off');
 save_system(model);
 
-sim(model);
+simOut = sim(model, 'ReturnWorkspaceOutputs', 'on');
 
-t_out = tout;
-out   = yout{1}.Values.Data(:);
+t_out = simOut.tout(:);
+raw   = simOut.yout;
+if isa(raw, 'Simulink.SimulationData.Dataset')
+    out = raw{1}.Values.Data(:);
+else
+    out = raw(:,1);
+end
 
 fid = fopen('ballBeam_ref.csv', 'w');
 fprintf(fid, 'time,BallPosition\r\n');
-for i = 1:length(t_out)
+for i = 1:min(length(t_out),length(out))
     fprintf(fid, '%.10f,%.10f\r\n', t_out(i), out(i));
 end
 fclose(fid);
-fprintf('  Ball beam workspace ready\n');
-fprintf('  Reference saved: ballBeam_ref.csv (%d rows)\n', length(t_out));
+fprintf('  Ball beam done: %d rows\n', length(t_out));
