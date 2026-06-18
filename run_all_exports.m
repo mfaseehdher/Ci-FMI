@@ -17,9 +17,10 @@ fprintf('================================================\n');
 fprintf('  MATLAB Export Pipeline\n');
 fprintf('================================================\n\n');
 
-slx_files = dir(fullfile(experiments_dir, '**', '*.slx'));
+slx_files = [dir(fullfile(experiments_dir, '**', '*.slx')); ...
+             dir(fullfile(experiments_dir, '**', '*.mdl'))];
 if isempty(slx_files)
-    error('No .slx files found in %s', experiments_dir);
+    error('No .slx or .mdl files found in %s', experiments_dir);
 end
 fprintf('Found %d model(s)\n\n', numel(slx_files));
 
@@ -27,7 +28,7 @@ passed = {}; failed = {};
 
 for i = 1:numel(slx_files)
     model_dir  = slx_files(i).folder;
-    model_name = erase(slx_files(i).name, '.slx');
+    [~, model_name, ~] = fileparts(slx_files(i).name);
     fprintf('--- [%d/%d] %s ---\n', i, numel(slx_files), model_name);
     try
         process_one_model(model_name, model_dir);
@@ -63,26 +64,18 @@ try
         error('No setup_*.m found in %s', model_dir);
     end
 
-    % Run setup as script in base workspace using evalin
-    % This ensures tout/yout land in base workspace (same as running script)
+    % Run setup as a script in base workspace.
+    % Setup loads model, configures it, runs sim, saves reference CSV.
     setup_script = fullfile(model_dir, setup_files(1).name);
     fprintf('  [1/4] Running setup: %s\n', setup_files(1).name);
     evalin('base', sprintf("run('%s')", strrep(setup_script, '\', '\\')));
 
-    % Get reference CSV name from base workspace
-    % The setup script should have saved a reference CSV already
-    % Check if it exists
+    % Verify reference CSV was created by setup
     csv_files = dir('*_ref.csv');
-    if ~isempty(csv_files)
-        fprintf('     Reference CSV found: %s\n', csv_files(1).name);
-        ref_csv = csv_files(1).name;
-    else
-        % Setup did not save CSV - do it here using simOut
-        fprintf('  [2/4] Running simulation for reference...\n');
-        simOut  = sim(model_name, 'ReturnWorkspaceOutputs', 'on');
-        ref_csv = save_reference_csv(simOut, model_name);
-        fprintf('     Reference saved: %s\n', ref_csv);
+    if isempty(csv_files)
+        error('Setup did not produce a reference CSV');
     end
+    fprintf('  [2/4] Reference CSV: %s\n', csv_files(1).name);
 
     % Export FMU
     fprintf('  [3/4] Exporting FMU...\n');
