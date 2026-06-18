@@ -1,4 +1,7 @@
 % setup_suspension.m
+% suspmod.mdl - suspension model
+% Check if it has Inport; old script used external input
+
 model = 'suspmod';
 
 M1 = 2500;  M2 = 320;
@@ -19,20 +22,33 @@ set_param(model,'SolverType','Fixed-step');
 set_param(model,'Solver','ode4');
 set_param(model,'FixedStep','0.001');
 set_param(model,'StopTime',num2str(t_stop));
-set_param(model,'LoadExternalInput','on');
-set_param(model,'ExternalInput','[t, u]');
+
+% Check if model has root inport - decide external input
+inports = find_system(model, 'SearchDepth', 1, 'BlockType', 'Inport');
+if ~isempty(inports)
+    set_param(model,'LoadExternalInput','on');
+    set_param(model,'ExternalInput','[t, u]');
+    fprintf('  Suspension: using external input\n');
+else
+    set_param(model,'LoadExternalInput','off');
+    fprintf('  Suspension: using internal source\n');
+end
 save_system(model);
 
-sim(model);
+simOut = sim(model, 'ReturnWorkspaceOutputs', 'on');
 
-t_out  = tout;
-out    = yout{1}.Values.Data(:);
+t_out = simOut.tout(:);
+raw   = simOut.yout;
+if isa(raw, 'Simulink.SimulationData.Dataset')
+    out = raw{1}.Values.Data(:);
+else
+    out = raw(:,1);
+end
 
 fid = fopen('suspmod_ref.csv', 'w');
 fprintf(fid, 'time,BodyDisplacement\r\n');
-for i = 1:length(t_out)
+for i = 1:min(length(t_out),length(out))
     fprintf(fid, '%.10f,%.10f\r\n', t_out(i), out(i));
 end
 fclose(fid);
-fprintf('  Suspension workspace ready\n');
-fprintf('  Reference saved: suspmod_ref.csv (%d rows)\n', length(t_out));
+fprintf('  Suspension done: %d rows\n', length(t_out));
