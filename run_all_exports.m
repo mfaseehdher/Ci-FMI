@@ -130,35 +130,44 @@ end
 % =============================================================
 function generate_json(model_name, model_dir, stop_time, dt)
 
-out_blocks = find_system(model_name, 'BlockType', 'Outport');
-in_blocks  = find_system(model_name, 'BlockType', 'Inport');
+fmu_file = sprintf('%s.fmu', model_name);
+fmu_path = fullfile(model_dir, fmu_file);
+
+if ~isfile(fmu_path)
+    fmu_files = dir(fullfile(model_dir, '*.fmu'));
+    if isempty(fmu_files)
+        error('No FMU found in %s', model_dir);
+    end
+    fmu_file = fmu_files(1).name;
+    fmu_path = fullfile(model_dir, fmu_file);
+end
+
+[input_names, output_names] = read_fmu_ports(fmu_path);
+ref_signal_names = read_reference_signal_names(model_dir, model_name);
 
 components  = struct();
 connections = {};
 
-if ~isempty(in_blocks)
+if ~isempty(input_names)
     ports = struct();
-    for i = 1:numel(in_blocks)
-        pname = clean_name(get_param(in_blocks{i}, 'Name'));
-        ports.(pname) = struct('initial', 0, 'step', 1, 'step_time', 0);
-        connections{end+1} = conn('stim', pname, 'fmu', pname);
+    for i = 1:numel(input_names)
+        stim_port = clean_name(input_names{i});
+        ports.(stim_port) = struct('initial', 0, 'step', 1, 'step_time', 0);
+        connections{end+1} = conn('stim', stim_port, 'fmu', input_names{i});
     end
     components.stim = struct('type', 'step', 'ports', ports);
 end
 
-fmu_files = dir(fullfile(model_dir, '*.fmu'));
-if ~isempty(fmu_files)
-    fmu_file = fmu_files(1).name;
-else
-    fmu_file = sprintf('%s.fmu', model_name);
-end
 components.fmu = struct('type', 'fmu', 'file', fmu_file);
 components.log = struct('type', 'logger', ...
     'file', sprintf('results_%s.csv', model_name));
 
-for i = 1:numel(out_blocks)
-    pname = clean_name(get_param(out_blocks{i}, 'Name'));
-    connections{end+1} = conn('fmu', pname, 'log', pname);
+for i = 1:numel(output_names)
+    log_name = output_names{i};
+    if i <= numel(ref_signal_names)
+        log_name = ref_signal_names{i};
+    end
+    connections{end+1} = conn('fmu', output_names{i}, 'log', log_name);
 end
 
 experiment             = struct();
@@ -173,8 +182,71 @@ json_path = fullfile(model_dir, sprintf('%s.json', model_name));
 fid = fopen(json_path, 'w');
 fprintf(fid, '%s', json_str);
 fclose(fid);
+
 end
 
+
+function [input_names, output_names] = read_fmu_ports(fmu_path)
+
+tmp_dir = tempname;
+mkdir(tmp_dir);
+cleanup = onCleanup(@() rmdir(tmp_dir, 's'));
+
+unzip(fmu_path, tmp_dir);
+xml_path = fullfile(tmp_dir, 'modelDescription.xml');
+
+doc = xmlread(xml_path);
+vars = doc.getElementsByTagName('ScalarVariable');
+
+input_names = {};
+output_names = {};
+
+for i = 0:vars.getLength-1
+    node = vars.item(i);
+    name = char(node.getAttribute('name'));
+    causality = char(node.getAttribute('causality'));
+
+    if strcmp(causality, 'input')
+        input_names{end+1} = name;
+    elseif strcmp(causality, 'output')
+        output_names{end+1} = name;
+    end
+end
+
+end
+
+
+function signal_names = read_reference_signal_names(model_dir, model_name)
+
+signal_names = {};
+ref_path = fullfile(model_dir, sprintf('%s_ref.csv', model_name));
+
+if ~isfile(ref_path)
+    refs = dir(fullfile(model_dir, '*_ref.csv'));
+    if isempty(refs)
+        return
+    end
+    ref_path = fullfile(model_dir, refs(1).name);
+end
+
+fid = fopen(ref_path, 'r');
+if fid < 0
+    return
+end
+
+header = fgetl(fid);
+fclose(fid);
+
+if ~ischar(header)
+    return
+end
+
+parts = strsplit(strtrim(header), ',');
+if numel(parts) > 1
+    signal_names = parts(2:end);
+end
+
+end
 
 % =============================================================
 function c = conn(src_comp, src_port, dst_comp, dst_port)
