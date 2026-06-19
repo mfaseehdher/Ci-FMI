@@ -83,14 +83,12 @@ jobs:
 
       - name: Install Python dependencies
         run: |
-          pip install fmpy networkx matplotlib dtaidistance --quiet
+          python -m pip install --upgrade pip --quiet
+          python -m pip install fmpy networkx matplotlib --quiet
 
       - name: Run all experiments
         run: |
-          python run_all_experiments.py \
-            --experiments experiments \
-            --tol 0.01 \
-            --plots-dir plots
+         python run_all_experiments.py --experiments experiments --tol 0.01 --plots-dir plots
 
       - name: Upload plots
         uses: actions/upload-artifact@v4
