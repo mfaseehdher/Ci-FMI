@@ -69,6 +69,9 @@ jobs:
     name: Python Validation (Run FMU + Compare + Plot)
     runs-on: self-hosted
     needs: matlab_export      # wait for Stage 1 to finish
+    env:
+      PYTHONIOENCODING: utf-8
+      PYTHONUTF8: "1"
 
     steps:
 
