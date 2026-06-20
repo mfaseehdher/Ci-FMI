@@ -23,46 +23,24 @@ Exit codes:
   0  all experiments passed
   1  one or more experiments failed
   2  no experiments found
-"""
 
 import argparse
+import json
 import os
 import subprocess
 import sys
-import json
 from datetime import datetime
 from typing import List, Optional
 
 
-# ─────────────────────────────────────────────────────────────────────────────
-# Paths
-# ─────────────────────────────────────────────────────────────────────────────
-
-# Root directory of the repo (where generic.py, compare.py etc. live)
 REPO_ROOT = os.path.dirname(os.path.abspath(__file__))
 
 
-# ─────────────────────────────────────────────────────────────────────────────
-# Discover experiments
-# ─────────────────────────────────────────────────────────────────────────────
-
-def discover_experiments(experiments_dir: str,
-                         model_filter: Optional[str] = None,
-                         category_filter: Optional[str] = None) -> List[dict]:
-    """
-    Walk experiments/ directory and find all valid experiment folders.
-
-    Categorized structure:
-      experiments/
-        first_order/
-          cruise_control/
-            cruise_control.json
-            cruise_control_ref.csv
-            ccmodel.fmu
-        second_order/
-          suspension/
-            ...
-    """
+def discover_experiments(
+    experiments_dir: str,
+    model_filter: Optional[str] = None,
+    category_filter: Optional[str] = None,
+) -> List[dict]:
     experiments = []
 
     if not os.path.isdir(experiments_dir):
@@ -73,45 +51,49 @@ def discover_experiments(experiments_dir: str,
         if not os.path.isdir(model_dir):
             return
 
-        # Apply filters
-        if model_filter and model_name != model_filter:
-            return
         if category_filter and category != category_filter:
             return
 
-        # Find JSON config file
         json_files = [f for f in os.listdir(model_dir) if f.endswith(".json")]
         if not json_files:
             return
 
-        # Prefer JSON matching folder name
         json_file = next(
-            (jf for jf in json_files if jf.replace(".json", "") == model_name),
-            json_files[0]
+            (jf for jf in json_files if os.path.splitext(jf)[0] == model_name),
+            json_files[0],
         )
-        json_path = os.path.join(model_dir, json_file)
 
-        # Find reference CSV
-        ref_csv = os.path.join(model_dir, f"{model_name}_ref.csv")
-        has_ref = os.path.isfile(ref_csv)
+        json_path = os.path.join(model_dir, json_file)
+        case_name = os.path.splitext(json_file)[0]
+
+        if model_filter and model_filter not in (model_name, case_name):
+            return
+
+        ref_csv = os.path.join(model_dir, f"{case_name}_ref.csv")
+        if not os.path.isfile(ref_csv):
+            refs = sorted(f for f in os.listdir(model_dir) if f.endswith("_ref.csv"))
+            ref_csv = os.path.join(model_dir, refs[0]) if refs else None
+
+        has_ref = ref_csv is not None and os.path.isfile(ref_csv)
 
         display = f"{category}/{model_name}"
         experiments.append({
-            "name":         model_name,
+            "name": case_name,
             "display_name": display,
-            "category":     category,
-            "dir":          model_dir,
-            "json":         json_path,
-            "ref_csv":      ref_csv if has_ref else None,
+            "category": category,
+            "dir": model_dir,
+            "json": json_path,
+            "ref_csv": ref_csv if has_ref else None,
         })
+
         status = "with reference" if has_ref else "no reference"
         print(f"[discover] Found: {display} ({status})")
 
-    # Walk two levels: category / model
     for category in sorted(os.listdir(experiments_dir)):
         cat_path = os.path.join(experiments_dir, category)
         if not os.path.isdir(cat_path):
             continue
+
         for model_name in sorted(os.listdir(cat_path)):
             model_dir = os.path.join(cat_path, model_name)
             try_add(model_dir, model_name, category)
@@ -119,83 +101,91 @@ def discover_experiments(experiments_dir: str,
     return experiments
 
 
-# ─────────────────────────────────────────────────────────────────────────────
-# Run one experiment
-# ─────────────────────────────────────────────────────────────────────────────
-
-def run_experiment(exp: dict, tol: float,
-                   generate_plots: bool, plots_dir: str) -> dict:
-    """
-    Run one experiment:
-      1. generic.py   -- simulate FMU
-      2. compare.py   -- validate against reference
-      3. plot_results.py -- generate plots
-    """
-    name      = exp["name"]
+def run_experiment(exp: dict, tol: float, generate_plots: bool, plots_dir: str) -> dict:
+    name = exp["name"]
     model_dir = exp["dir"]
     json_path = exp["json"]
-    ref_csv   = exp["ref_csv"]
+    ref_csv = exp["ref_csv"]
 
     result = {
-        "name":         name,
+        "name": name,
         "display_name": exp["display_name"],
-        "category":     exp["category"],
-        "passed":       False,
-        "errors":       [],
-        "skipped":      False,
+        "category": exp["category"],
+        "passed": False,
+        "errors": [],
+        "skipped": False,
     }
 
-    print(f"\n{'='*60}")
+    print(f"\n{'=' * 60}")
     print(f"  Running: {exp['display_name']}")
-    print(f"{'='*60}")
+    print(f"{'=' * 60}")
 
-    # Find results CSV path from JSON
     try:
         with open(json_path) as f:
             cfg = json.load(f)
+
         results_csv = None
         for comp_spec in cfg.get("components", {}).values():
             if comp_spec.get("type") == "logger":
                 fname = comp_spec.get("file", f"results_{name}.csv")
-                results_csv = os.path.join(model_dir, fname) \
-                    if not os.path.isabs(fname) else fname
+                results_csv = (
+                    os.path.join(model_dir, fname)
+                    if not os.path.isabs(fname)
+                    else fname
+                )
                 break
+
         if not results_csv:
             results_csv = os.path.join(model_dir, f"results_{name}.csv")
+
     except Exception as e:
         result["errors"].append(f"Cannot read JSON: {e}")
         return result
 
-    # ── Step 1: Simulate ──────────────────────────────────────────
     print(f"\n[{name}] Step 1/3: Simulating...")
     generic_py = os.path.join(REPO_ROOT, "generic.py")
+
     sim = subprocess.run(
-        [sys.executable, generic_py, json_path],
-        capture_output=True, text=True
+        [sys.executable, generic_py, os.path.abspath(json_path)],
+        cwd=model_dir,
+        capture_output=True,
+        text=True,
     )
+
     print(sim.stdout)
     if sim.returncode != 0:
         result["errors"].append(f"Simulation failed:\n{sim.stderr}")
         print(f"[{name}] SIMULATION FAILED")
         print(sim.stderr)
         return result
+
     print(f"[{name}] Simulation OK")
 
-    # ── Step 2: Validate ──────────────────────────────────────────
     if ref_csv is None:
         print(f"[{name}] Step 2/3: No reference CSV -- skipping validation")
-        result["passed"]  = True
+        result["passed"] = True
         result["skipped"] = True
     else:
         print(f"[{name}] Step 2/3: Comparing against reference...")
         compare_py = os.path.join(REPO_ROOT, "compare.py")
         metrics_csv = os.path.join(model_dir, f"metrics_{name}.csv")
+
         cmp = subprocess.run(
-            [sys.executable, compare_py,
-             ref_csv, results_csv, "--tol", str(tol),
-             "--metrics-csv", metrics_csv],
-            capture_output=True, text=True
+            [
+                sys.executable,
+                compare_py,
+                os.path.abspath(ref_csv),
+                os.path.abspath(results_csv),
+                "--tol",
+                str(tol),
+                "--metrics-csv",
+                os.path.abspath(metrics_csv),
+                "--no-append",
+            ],
+            capture_output=True,
+            text=True,
         )
+
         print(cmp.stdout)
         if cmp.returncode == 0:
             result["passed"] = True
@@ -203,40 +193,47 @@ def run_experiment(exp: dict, tol: float,
         else:
             result["errors"].append("RMSE exceeded tolerance")
             print(f"[{name}] FAIL")
+            print(cmp.stderr)
 
-    # ── Step 3: Plot ──────────────────────────────────────────────
     if generate_plots and ref_csv is not None:
         print(f"[{name}] Step 3/3: Generating plots...")
-        model_plots = os.path.join(plots_dir, exp["category"], name)
+        model_plots = os.path.abspath(os.path.join(plots_dir, exp["category"], name))
         os.makedirs(model_plots, exist_ok=True)
+
         plot_py = os.path.join(REPO_ROOT, "plot_results.py")
         plot = subprocess.run(
-            [sys.executable, plot_py,
-             ref_csv, results_csv,
-             "--title", name,
-             "--output", model_plots],
-            capture_output=True, text=True
+            [
+                sys.executable,
+                plot_py,
+                os.path.abspath(ref_csv),
+                os.path.abspath(results_csv),
+                "--title",
+                name,
+                "--output",
+                model_plots,
+            ],
+            capture_output=True,
+            text=True,
         )
+
         if plot.returncode == 0:
             print(f"[{name}] Plots saved to {model_plots}")
         else:
-            print(f"[{name}] Plot generation failed (non-critical)")
+            print(f"[{name}] Plot generation failed")
+            print(plot.stderr)
+
     elif generate_plots:
         print(f"[{name}] Step 3/3: No reference -- skipping plots")
 
     return result
 
 
-# ─────────────────────────────────────────────────────────────────────────────
-# Summary
-# ─────────────────────────────────────────────────────────────────────────────
-
 def print_summary(results: List[dict], tol: float) -> bool:
-    print(f"\n{'='*65}")
-    print(f"  VALIDATION SUMMARY")
+    print(f"\n{'=' * 65}")
+    print("  VALIDATION SUMMARY")
     print(f"  Tolerance : {tol}")
     print(f"  Run at    : {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}")
-    print(f"{'='*65}")
+    print(f"{'=' * 65}")
 
     categories = {}
     for r in results:
@@ -249,7 +246,8 @@ def print_summary(results: List[dict], tol: float) -> bool:
     for cat_name, cat_results in sorted(categories.items()):
         print(f"\n  [{cat_name.upper()}]")
         print(f"  {'Model':<{col}}  {'Status':>8}")
-        print(f"  {'-'*col}  {'--------'}")
+        print(f"  {'-' * col}  {'--------'}")
+
         for r in cat_results:
             if r["skipped"]:
                 status = "RUN-ONLY"
@@ -258,26 +256,22 @@ def print_summary(results: List[dict], tol: float) -> bool:
             else:
                 status = "FAIL"
                 all_passed = False
+
             notes = " | ".join(r["errors"]) if r["errors"] else ""
             print(f"  {r['display_name']:<{col}}  {status:>8}  {notes}")
 
-    total   = len(results)
-    passed  = sum(1 for r in results if r["passed"])
-    failed  = sum(1 for r in results if not r["passed"] and not r["skipped"])
+    total = len(results)
+    passed = sum(1 for r in results if r["passed"])
+    failed = sum(1 for r in results if not r["passed"] and not r["skipped"])
     skipped = sum(1 for r in results if r["skipped"])
 
-    print(f"\n{'='*65}")
-    print(f"  Total: {total}  Passed: {passed}  "
-          f"Failed: {failed}  Run-only: {skipped}")
-    verdict = "ALL PASSED" if all_passed else "SOME FAILED"
-    print(f"  Overall verdict: {verdict}")
-    print(f"{'='*65}\n")
+    print(f"\n{'=' * 65}")
+    print(f"  Total: {total}  Passed: {passed}  Failed: {failed}  Run-only: {skipped}")
+    print(f"  Overall verdict: {'ALL PASSED' if all_passed else 'SOME FAILED'}")
+    print(f"{'=' * 65}\n")
+
     return all_passed
 
-
-# ─────────────────────────────────────────────────────────────────────────────
-# Entry point
-# ─────────────────────────────────────────────────────────────────────────────
 
 def main() -> int:
     parser = argparse.ArgumentParser(
@@ -292,8 +286,12 @@ def main() -> int:
     args = parser.parse_args()
 
     print(f"\n[runner] Discovering experiments in: {args.experiments}")
+
     experiments = discover_experiments(
-        args.experiments, args.model, args.category)
+        args.experiments,
+        model_filter=args.model,
+        category_filter=args.category,
+    )
 
     if not experiments:
         print("ERROR: no experiments found.")
@@ -305,9 +303,10 @@ def main() -> int:
     results = []
     for exp in experiments:
         result = run_experiment(
-            exp, tol=args.tol,
+            exp,
+            tol=args.tol,
             generate_plots=not args.no_plots,
-            plots_dir=args.plots_dir
+            plots_dir=args.plots_dir,
         )
         results.append(result)
 
