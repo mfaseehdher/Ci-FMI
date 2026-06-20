@@ -44,9 +44,14 @@ jobs:
           name: matlab-outputs
           path: .
 
-      - name: List downloaded files (debug)
+      - name: Show structure after download (debug)
         run: |
-          dir experiments\control\motor_speed
+          echo "=== repo root ==="
+          dir
+          echo "=== experiments tree ==="
+          dir /s /b experiments\*.fmu
+          dir /s /b experiments\*.json
+          dir /s /b experiments\*_ref.csv
         shell: cmd
 
       - name: Install Python dependencies
