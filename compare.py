@@ -329,6 +329,81 @@ def print_report(
 # Core function (importable from CI scripts)
 # ─────────────────────────────────────────────────────────────────────────────
 
+def write_metrics_csv(results: List[Dict], metrics_path: str,
+                      tol: Optional[float], model_name: str = "") -> None:
+    """Write all metrics to a CSV file so they are saved in the results,
+    not just printed to the console.
+
+    One row per signal with columns:
+      model, signal, RMSE, MAE, Max_abs_err, Rel_RMSE_percent, DTW, Status
+    """
+    with open(metrics_path, "w", newline="") as f:
+        writer = csv.writer(f)
+        writer.writerow([
+            "model", "signal", "RMSE", "MAE", "Max_abs_err",
+            "Rel_RMSE_percent", "DTW", "Status"
+        ])
+        for r in results:
+            rel = r["rel_rmse"]
+            rel_str = f"{rel*100:.6f}" if not math.isnan(rel) else "N/A"
+            dtw_val = r.get("dtw", float("nan"))
+            dtw_str = f"{dtw_val:.6g}" if not math.isnan(dtw_val) else "N/A"
+            if tol is not None:
+                status = "PASS" if r["rmse"] <= tol else "FAIL"
+            else:
+                status = "N/A"
+            writer.writerow([
+                model_name,
+                r["signal"],
+                f"{r['rmse']:.10g}",
+                f"{r['mae']:.10g}",
+                f"{r['max_abs']:.10g}",
+                rel_str,
+                dtw_str,
+                status,
+            ])
+    print(f"  Metrics saved to: {metrics_path}")
+
+
+def append_metrics_to_results(results: List[Dict], out_path: str,
+                              tol: Optional[float]) -> None:
+    """Append metric summary rows to the END of the results CSV itself.
+
+    The supervisor asked for metrics IN the results. This adds a commented
+    summary block at the bottom of the output CSV after the data rows, so
+    the single results file contains both the time series AND the metrics.
+    """
+    try:
+        with open(out_path, "a", newline="") as f:
+            writer = csv.writer(f)
+            writer.writerow([])
+            writer.writerow(["# === VALIDATION METRICS ==="])
+            writer.writerow([
+                "# signal", "RMSE", "MAE", "Max_abs_err",
+                "Rel_RMSE_percent", "DTW", "Status"
+            ])
+            for r in results:
+                rel = r["rel_rmse"]
+                rel_str = f"{rel*100:.6f}" if not math.isnan(rel) else "N/A"
+                dtw_val = r.get("dtw", float("nan"))
+                dtw_str = f"{dtw_val:.6g}" if not math.isnan(dtw_val) else "N/A"
+                if tol is not None:
+                    status = "PASS" if r["rmse"] <= tol else "FAIL"
+                else:
+                    status = "N/A"
+                writer.writerow([
+                    f"# {r['signal']}",
+                    f"{r['rmse']:.10g}",
+                    f"{r['mae']:.10g}",
+                    f"{r['max_abs']:.10g}",
+                    rel_str,
+                    dtw_str,
+                    status,
+                ])
+    except Exception as e:
+        print(f"  [warn] could not append metrics to results: {e}")
+
+
 def compare(
     ref_path: str,
     out_path: str,
@@ -336,10 +411,16 @@ def compare(
     tol: Optional[float] = None,
     shift: float = 0.0,
     use_dtw: bool = True,
+    metrics_path: Optional[str] = None,
+    append_to_results: bool = True,
 ) -> bool:
     """Compare two CSV files signal by signal.
     Returns True if all signals pass (RMSE <= tol).
-    Importable from CI pipeline scripts."""
+    Importable from CI pipeline scripts.
+
+    metrics_path       : if given, write a standalone metrics CSV here
+    append_to_results  : if True, append metric rows to the bottom of out_path
+    """
     ref_t, ref_sigs = load_csv(ref_path)
     out_t, out_sigs = load_csv(out_path)
 
@@ -388,7 +469,20 @@ def compare(
             "mean_signed": mean_signed,
         })
 
-    return print_report(results, tol, ref_path, out_path, use_dtw)
+    all_pass = print_report(results, tol, ref_path, out_path, use_dtw)
+
+    # Save metrics so they live in the results, not only on screen
+    model_name = ""
+    base = out_path.replace("\\", "/").split("/")[-1]
+    if base.startswith("results_"):
+        model_name = base[len("results_"):].rsplit(".", 1)[0]
+
+    if metrics_path:
+        write_metrics_csv(results, metrics_path, tol, model_name)
+    if append_to_results:
+        append_metrics_to_results(results, out_path, tol)
+
+    return all_pass
 
 
 # ─────────────────────────────────────────────────────────────────────────────
@@ -418,6 +512,14 @@ def main() -> int:
         "--no-dtw", action="store_true",
         help="Skip DTW (faster, no dtaidistance library needed)"
     )
+    parser.add_argument(
+        "--metrics-csv", default=None, metavar="PATH",
+        help="Write a standalone metrics CSV to this path"
+    )
+    parser.add_argument(
+        "--no-append", action="store_true",
+        help="Do not append metric rows to the bottom of the output CSV"
+    )
     args = parser.parse_args()
 
     try:
@@ -428,6 +530,8 @@ def main() -> int:
             tol=args.tol,
             shift=args.shift,
             use_dtw=not args.no_dtw,
+            metrics_path=args.metrics_csv,
+            append_to_results=not args.no_append,
         )
     except FileNotFoundError as e:
         print(f"ERROR: {e}")
