@@ -55,6 +55,7 @@ end
 function process_one_model(model_name, model_dir)
 
 original_dir = pwd;
+addpath(original_dir);
 cd(model_dir);
 
 try
