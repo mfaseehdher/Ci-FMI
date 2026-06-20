@@ -90,25 +90,21 @@ def discover_experiments(experiments_dir: str,
             json_files[0]
         )
         json_path = os.path.join(model_dir, json_file)
-        case_name = os.path.splitext(json_file)[0]
 
         # Find reference CSV
         ref_csv = os.path.join(model_dir, f"{model_name}_ref.csv")
-        ref_csv = os.path.join(model_dir, f"{case_name}_ref.csv")
-        if not os.path.isfile(ref_csv):
-          refs = sorted(f for f in os.listdir(model_dir) if f.endswith("_ref.csv"))
-          ref_csv = os.path.join(model_dir, refs[0]) if refs else None
+        has_ref = os.path.isfile(ref_csv)
 
         display = f"{category}/{model_name}"
         experiments.append({
-          "name":         case_name,
-          "display_name": display,
-          "category":     category,
-          "dir":          model_dir,
-          "json":         json_path,
-          "ref_csv":      ref_csv,
+            "name":         model_name,
+            "display_name": display,
+            "category":     category,
+            "dir":          model_dir,
+            "json":         json_path,
+            "ref_csv":      ref_csv if has_ref else None,
         })
-        status = "with reference" if ref_csv else "no reference"
+        status = "with reference" if has_ref else "no reference"
         print(f"[discover] Found: {display} ({status})")
 
     # Walk two levels: category / model
@@ -174,9 +170,8 @@ def run_experiment(exp: dict, tol: float,
     print(f"\n[{name}] Step 1/3: Simulating...")
     generic_py = os.path.join(REPO_ROOT, "generic.py")
     sim = subprocess.run(
-      [sys.executable, generic_py, os.path.abspath(json_path)],
-      cwd=model_dir,
-      capture_output=True, text=True
+        [sys.executable, generic_py, json_path],
+        capture_output=True, text=True
     )
     print(sim.stdout)
     if sim.returncode != 0:
@@ -194,9 +189,11 @@ def run_experiment(exp: dict, tol: float,
     else:
         print(f"[{name}] Step 2/3: Comparing against reference...")
         compare_py = os.path.join(REPO_ROOT, "compare.py")
+        metrics_csv = os.path.join(model_dir, f"metrics_{name}.csv")
         cmp = subprocess.run(
             [sys.executable, compare_py,
-             ref_csv, results_csv, "--tol", str(tol)],
+             ref_csv, results_csv, "--tol", str(tol),
+             "--metrics-csv", metrics_csv],
             capture_output=True, text=True
         )
         print(cmp.stdout)
