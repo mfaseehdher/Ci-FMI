@@ -42,7 +42,12 @@ jobs:
         uses: actions/download-artifact@v4
         with:
           name: matlab-outputs
-          path: experiments/
+          path: .
+
+      - name: List downloaded files (debug)
+        run: |
+          dir experiments\control\motor_speed
+        shell: cmd
 
       - name: Install Python dependencies
         run: |
