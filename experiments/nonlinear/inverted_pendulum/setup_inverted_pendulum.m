@@ -36,6 +36,23 @@ set_param(model, 'SaveState',  'off');
 set_param(model, 'SaveOutput', 'on');
 set_param(model, 'SaveFormat', 'Dataset');
 
+% --- Algebraic loop handling (required for FMU export) ---
+% The inverted pendulum has an algebraic loop (N, P forces depend on
+% accelerations which depend on N, P). MATLAB can simulate it but cannot
+% export it to FMU C-code unless we break the loop. These settings let
+% the code generator resolve it.
+set_param(model, 'CombineOutputUpdateFcns', 'off');
+try
+    set_param(model, 'AlgebraicLoopSolver', 'TrustRegion');
+catch
+end
+try
+    % Minimize/avoid algebraic loop diagnostics blocking export
+    set_param(model, 'ArtificialAlgebraicLoopMsg', 'none');
+    set_param(model, 'AlgebraicLoopMsg', 'none');
+catch
+end
+
 % This model HAS a root Inport (Force) -- use external input
 set_param(model, 'LoadExternalInput', 'on');
 set_param(model, 'ExternalInput',     '[t, u]');
