@@ -38,16 +38,24 @@ jobs:
       - name: Checkout repository
         uses: actions/checkout@v4
 
+      - name: Clean leftover artifact folders (self-hosted runner)
+        run: |
+          if exist control rmdir /s /q control
+          if exist first_order rmdir /s /q first_order
+          if exist second_order rmdir /s /q second_order
+          if exist stiff rmdir /s /q stiff
+          if exist nonlinear rmdir /s /q nonlinear
+          if exist plots rmdir /s /q plots
+        shell: cmd
+
       - name: Download MATLAB outputs
         uses: actions/download-artifact@v4
         with:
           name: matlab-outputs
-          path: .
+          path: experiments
 
       - name: Show structure after download (debug)
         run: |
-          echo "=== repo root ==="
-          dir
           echo "=== experiments tree ==="
           dir /s /b experiments\*.fmu
           dir /s /b experiments\*.json
