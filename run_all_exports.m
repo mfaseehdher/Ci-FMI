@@ -92,7 +92,7 @@ try
         dt = 0.01;
     end
     
-    generate_json(model_name, model_dir, stop_time, 0.01);
+    generate_json(model_name, model_dir, stop_time, dt);
     fprintf('     JSON generated\n');
 
     close_system(model_name, 0);
