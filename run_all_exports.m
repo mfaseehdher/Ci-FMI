@@ -86,6 +86,12 @@ try
     % Generate JSON
     fprintf('  [4/4] Generating JSON...\n');
     stop_time = str2double(get_param(model_name, 'StopTime'));
+    dt = str2double(get_param(model_name, 'FixedStep'));
+
+    if isnan(dt) || dt <= 0
+        dt = 0.01;
+    end
+    
     generate_json(model_name, model_dir, stop_time, 0.01);
     fprintf('     JSON generated\n');
 
