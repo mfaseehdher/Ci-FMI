@@ -31,6 +31,7 @@ assignin('base','IO',IO);
 t_stop = 10;
 
 load_system(model);
+add_outport_from_to_workspace(model, 'theta_nl', 'Angle');
 set_param(model, 'SolverType', 'Fixed-step');
 set_param(model, 'Solver',     'ode4');
 set_param(model, 'FixedStep',  '0.01');
@@ -103,3 +104,48 @@ for i = 1:n
 end
 fclose(fid);
 fprintf('  Simple pendulum done: %d rows (nonlinear angle)\n', n);
+
+function add_outport_from_to_workspace(model, variableName, outName)
+
+blocks = find_system(model, ...
+    'LookUnderMasks', 'all', ...
+    'FollowLinks', 'on', ...
+    'BlockType', 'ToWorkspace');
+
+target = '';
+for i = 1:numel(blocks)
+    if strcmp(get_param(blocks{i}, 'VariableName'), variableName)
+        target = blocks{i};
+        break;
+    end
+end
+
+if isempty(target)
+    error('Could not find To Workspace block with VariableName "%s".', variableName);
+end
+
+ph = get_param(target, 'PortHandles');
+inLine = get_param(ph.Inport(1), 'Line');
+
+if inLine == -1
+    error('To Workspace block "%s" input is not connected.', target);
+end
+
+srcPort = get_param(inLine, 'SrcPortHandle');
+outportPath = [model '/' outName];
+
+if isempty(find_system(model, 'SearchDepth', 1, 'Name', outName))
+    add_block('simulink/Sinks/Out1', outportPath);
+end
+
+outPh = get_param(outportPath, 'PortHandles');
+
+try
+    add_line(model, srcPort, outPh.Inport(1), 'autorouting', 'on');
+catch
+end
+
+save_system(model);
+fprintf('Added Outport "%s" from To Workspace "%s"\n', outName, variableName);
+
+end
