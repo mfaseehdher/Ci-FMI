@@ -382,10 +382,15 @@ class FMUComponent(Component):
             self._n_sub = 1
             self._h = comm_dt
 
-    def do_step(self, t: float, dt: float) -> None:
+       def do_step(self, t: float, dt: float) -> None:
         # Set inputs (held constant across all sub-steps — ZOH)
         for k, v in self.inputs.items():
             self._fmu_set(k, v)
+
+        if abs(dt) < 1e-15:
+            for k in self.outputs_list:
+                self.outputs[k] = self._fmu_get(k)
+            return
 
         # Sub-step loop
         t_local = t
