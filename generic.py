@@ -382,7 +382,7 @@ class FMUComponent(Component):
             self._n_sub = 1
             self._h = comm_dt
 
-       def do_step(self, t: float, dt: float) -> None:
+    def do_step(self, t: float, dt: float) -> None:
         # Set inputs (held constant across all sub-steps — ZOH)
         for k, v in self.inputs.items():
             self._fmu_set(k, v)
