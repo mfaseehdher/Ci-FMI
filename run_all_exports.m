@@ -4,10 +4,10 @@ function run_all_exports(experiments_dir)
 %   1. Changes to model directory
 %   2. Runs setup_*.m which loads model, sets params, runs sim, saves CSV
 %   3. Exports FMU
-%   4. Generates JSON
 %
 % The setup files handle everything up to and including simulation.
-% This function handles FMU export and JSON generation.
+% This function handles MATLAB reference generation and FMU export.
+% Python generates normal single-FMU experiment JSON files later.
 
 if nargin < 1
     experiments_dir = 'experiments';
@@ -169,21 +169,9 @@ try
     fprintf('  [2/4] Reference CSV: %s\n', csv_files(1).name);
 
     % Export FMU
-    fprintf('  [3/4] Exporting FMU...\n');
+    fprintf('  [3/3] Exporting FMU...\n');
     exportToFMU2CS(model_name, 'SaveDirectory', model_dir);
     fprintf('     FMU exported\n');
-
-    % Generate JSON
-    fprintf('  [4/4] Generating JSON...\n');
-    stop_time = str2double(get_param(model_name, 'StopTime'));
-    dt = str2double(get_param(model_name, 'FixedStep'));
-
-    if isnan(dt) || dt <= 0
-        dt = 0.01;
-    end
-    
-    generate_json(model_name, model_dir, stop_time, dt);
-    fprintf('     JSON generated\n');
 
     close_system(model_name, 0);
 
