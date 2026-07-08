@@ -17,12 +17,18 @@ fprintf('================================================\n');
 fprintf('  MATLAB Export Pipeline\n');
 fprintf('================================================\n\n');
 
-slx_files = [dir(fullfile(experiments_dir, '**', '*.slx')); ...
-             dir(fullfile(experiments_dir, '**', '*.mdl'))];
-if isempty(slx_files)
-    error('No .slx or .mdl files found in %s', experiments_dir);
+coupled_markers = dir(fullfile(experiments_dir, '**', 'coupled_experiment.json'));
+coupled_dirs = unique({coupled_markers.folder});
+
+model_files = [dir(fullfile(experiments_dir, '**', '*.slx')); ...
+               dir(fullfile(experiments_dir, '**', '*.mdl'))];
+slx_files = filter_standard_models(model_files, coupled_dirs);
+
+if isempty(slx_files) && isempty(coupled_dirs)
+    error('No standard or coupled experiments found in %s', experiments_dir);
 end
-fprintf('Found %d model(s)\n\n', numel(slx_files));
+fprintf('Found %d standard model(s)\n', numel(slx_files));
+fprintf('Found %d coupled experiment(s)\n\n', numel(coupled_dirs));
 
 passed = {}; failed = {};
 
@@ -40,6 +46,20 @@ for i = 1:numel(slx_files)
     end
 end
 
+for i = 1:numel(coupled_dirs)
+    model_dir = coupled_dirs{i};
+    [~, model_name] = fileparts(model_dir);
+    fprintf('--- Coupled [%d/%d] %s ---\n', i, numel(coupled_dirs), model_name);
+    try
+        process_coupled_experiment(model_dir);
+        passed{end+1} = sprintf('%s (coupled)', model_name);
+        fprintf('[%s] SUCCESS\n\n', model_name);
+    catch e
+        failed{end+1} = sprintf('%s (coupled)', model_name);
+        fprintf('[%s] FAILED: %s\n\n', model_name, e.message);
+    end
+end
+
 fprintf('================================================\n');
 fprintf('  Summary: %d passed, %d failed\n', numel(passed), numel(failed));
 for i = 1:numel(passed), fprintf('  PASS: %s\n', passed{i}); end
@@ -48,6 +68,76 @@ fprintf('================================================\n');
 if ~isempty(failed)
     error('Some models failed to export.');
 end
+end
+
+
+% =============================================================
+function filtered = filter_standard_models(model_files, coupled_dirs)
+
+if isempty(coupled_dirs)
+    filtered = model_files;
+    return;
+end
+
+keep = true(size(model_files));
+for i = 1:numel(model_files)
+    for j = 1:numel(coupled_dirs)
+        if strcmpi(model_files(i).folder, coupled_dirs{j})
+            keep(i) = false;
+            break;
+        end
+    end
+end
+
+filtered = model_files(keep);
+end
+
+
+% =============================================================
+function process_coupled_experiment(model_dir)
+
+original_dir = pwd;
+addpath(original_dir);
+cd(model_dir);
+
+try
+    setup_files = dir('setup_*.m');
+    if isempty(setup_files)
+        error('No setup_*.m found in coupled experiment %s', model_dir);
+    end
+
+    setup_script = fullfile(model_dir, setup_files(1).name);
+    fprintf('  [1/3] Running coupled setup: %s\n', setup_files(1).name);
+    evalin('base', sprintf("run('%s')", strrep(setup_script, '\', '\\')));
+
+    ref_files = dir('*_ref.csv');
+    if isempty(ref_files)
+        error('Coupled setup did not produce a reference CSV');
+    end
+    fprintf('  [2/3] Reference CSV: %s\n', ref_files(1).name);
+
+    fmu_files = dir('*.fmu');
+    if numel(fmu_files) < 2
+        error('Coupled setup must export at least two FMUs');
+    end
+
+    json_files = dir('*.json');
+    json_files = json_files(~strcmp({json_files.name}, 'coupled_experiment.json'));
+    if isempty(json_files)
+        error('Coupled setup did not produce a runnable experiment JSON');
+    end
+    fprintf('  [3/3] Coupled JSON: %s, FMUs: %d\n', ...
+        json_files(1).name, numel(fmu_files));
+
+    try, bdclose('all'); catch, end
+
+catch e
+    try, bdclose('all'); catch, end
+    cd(original_dir);
+    rethrow(e);
+end
+
+cd(original_dir);
 end
 
 
