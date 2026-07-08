@@ -1,0 +1,10 @@
+{
+  "type": "coupled",
+  "name": "motor_closed_loop",
+  "description": "Closed-loop motor speed validation: MATLAB monolithic reference compared with plant and controller FMUs coupled by generic.py.",
+  "reference_model": "Motor_Model_lag",
+  "fmu_models": [
+    "Motor_Model",
+    "Motor_Lag_Controller"
+  ]
+}
