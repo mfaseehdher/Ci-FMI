@@ -47,21 +47,21 @@ def load_csv(path):
     return t, data
 
 
-def interpolate(ref_t, ref_vals, out_t):
-    """Linearly interpolate ref onto out_t grid."""
+def interpolate(source_t, source_vals, target_t):
+    """Linearly interpolate source values onto target_t grid."""
     result = []
     j = 0
-    for ti in out_t:
-        while j < len(ref_t) - 2 and ref_t[j + 1] < ti - 1e-12:
+    for ti in target_t:
+        while j < len(source_t) - 2 and source_t[j + 1] < ti - 1e-12:
             j += 1
-        if j >= len(ref_t) - 1:
-            result.append(ref_vals[-1])
-        elif abs(ref_t[j] - ti) < 1e-12:
-            result.append(ref_vals[j])
+        if j >= len(source_t) - 1:
+            result.append(source_vals[-1])
+        elif abs(source_t[j] - ti) < 1e-12:
+            result.append(source_vals[j])
         else:
             # Linear interpolation
-            t0, t1 = ref_t[j], ref_t[j + 1]
-            v0, v1 = ref_vals[j], ref_vals[j + 1]
+            t0, t1 = source_t[j], source_t[j + 1]
+            v0, v1 = source_vals[j], source_vals[j + 1]
             frac = (ti - t0) / (t1 - t0) if t1 != t0 else 0
             result.append(v0 + frac * (v1 - v0))
     return result
@@ -78,8 +78,9 @@ def compute_metrics(ref, out):
     return rmse, max_err, mean_err, abs_errs
 
 
-def plot_signal(out_t, ref_vals, out_vals, abs_errs, signal_name, title,
-                rmse, max_err, output_dir):
+def plot_signal(plot_t, ref_vals, out_vals, abs_errs, signal_name, title,
+                rmse, max_err, output_dir, reference_label, output_label,
+                comparison_title):
     """Generate two plots for one signal."""
     # Import matplotlib here so script can still be used without it
     # for just computing metrics
@@ -92,15 +93,15 @@ def plot_signal(out_t, ref_vals, out_vals, abs_errs, signal_name, title,
     fig.suptitle(title, fontsize=14, fontweight="bold")
 
     # ---- Plot 1: Reference vs FMU output ----
-    ax1.plot(out_t, ref_vals, color="#1f77b4", linewidth=1.5,
-             label="MATLAB Reference", alpha=0.9)
-    ax1.plot(out_t, out_vals, color="#ff7f0e", linewidth=1.5,
-             label="FMU Output (generic.py)", linestyle="--", alpha=0.9)
+    ax1.plot(plot_t, ref_vals, color="#1f77b4", linewidth=1.5,
+             label=reference_label, alpha=0.9)
+    ax1.plot(plot_t, out_vals, color="#ff7f0e", linewidth=1.5,
+             label=output_label, linestyle="--", alpha=0.9)
     ax1.set_xlabel("Time (s)")
     ax1.set_ylabel(signal_name)
     ax1.legend(loc="best", framealpha=0.9)
     ax1.grid(True, alpha=0.3)
-    ax1.set_title(f"Reference vs FMU Output", fontsize=11)
+    ax1.set_title(comparison_title, fontsize=11)
 
     # Add RMSE annotation
     ax1.text(0.98, 0.02,
@@ -111,8 +112,8 @@ def plot_signal(out_t, ref_vals, out_vals, abs_errs, signal_name, title,
                        edgecolor="gray", alpha=0.8))
 
     # ---- Plot 2: Absolute error over time ----
-    ax2.fill_between(out_t, abs_errs, color="#d62728", alpha=0.3)
-    ax2.plot(out_t, abs_errs, color="#d62728", linewidth=1.0)
+    ax2.fill_between(plot_t, abs_errs, color="#d62728", alpha=0.3)
+    ax2.plot(plot_t, abs_errs, color="#d62728", linewidth=1.0)
     ax2.set_xlabel("Time (s)")
     ax2.set_ylabel("|Error|")
     ax2.set_title(f"Absolute Error Over Time", fontsize=11)
@@ -149,6 +150,12 @@ def main():
                         help="Output directory for PNG files")
     parser.add_argument("--signals", nargs="*", default=None,
                         help="Specific signals to plot (default: all shared)")
+    parser.add_argument("--reference-label", default="MATLAB Reference",
+                        help="Legend label for the reference signal")
+    parser.add_argument("--output-label", default="FMU Output (generic.py)",
+                        help="Legend label for the generated output signal")
+    parser.add_argument("--comparison-title", default="Reference vs FMU Output",
+                        help="Subtitle for the comparison plot")
     args = parser.parse_args()
 
     # Create output directory if needed
@@ -178,21 +185,24 @@ def main():
     print(f"Shared signals: {shared}")
     print()
 
-    # Interpolate reference onto output time grid if different lengths
-    need_interp = len(ref_t) != len(out_t)
+    # Interpolate output onto reference time grid, matching compare.py.
+    need_interp = len(ref_t) != len(out_t) or any(
+        abs(a - b) > 1e-12 for a, b in zip(ref_t, out_t)
+    )
     if need_interp:
         print(f"  Reference has {len(ref_t)} rows, results has {len(out_t)} rows")
-        print(f"  Interpolating reference onto results time grid")
+        print(f"  Interpolating results onto reference time grid")
         print()
 
     # Plot each signal
     all_files = []
     for sig in shared:
+        plot_t = ref_t
+        ref_vals = ref_sigs[sig]
         if need_interp:
-            ref_vals = interpolate(ref_t, ref_sigs[sig], out_t)
+            out_vals = interpolate(out_t, out_sigs[sig], ref_t)
         else:
-            ref_vals = ref_sigs[sig]
-        out_vals = out_sigs[sig]
+            out_vals = out_sigs[sig]
 
         rmse, max_err, mean_err, abs_errs = compute_metrics(ref_vals, out_vals)
 
@@ -203,8 +213,11 @@ def main():
         print(f"  Max |err|  = {max_err:.6g}")
         print(f"  Mean err   = {mean_err:.6g}")
 
-        filepath = plot_signal(out_t, ref_vals, out_vals, abs_errs,
-                               sig, plot_title, rmse, max_err, args.output)
+        filepath = plot_signal(
+            plot_t, ref_vals, out_vals, abs_errs, sig, plot_title, rmse,
+            max_err, args.output, args.reference_label, args.output_label,
+            args.comparison_title,
+        )
         all_files.append(filepath)
         print()
 

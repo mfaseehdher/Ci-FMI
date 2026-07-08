@@ -201,17 +201,29 @@ def run_experiment(exp: dict, tol: float, generate_plots: bool, plots_dir: str) 
         os.makedirs(model_plots, exist_ok=True)
 
         plot_py = os.path.join(REPO_ROOT, "plot_results.py")
+        plot_cmd = [
+            sys.executable,
+            plot_py,
+            os.path.abspath(ref_csv),
+            os.path.abspath(results_csv),
+            "--title",
+            name,
+            "--output",
+            model_plots,
+        ]
+
+        if os.path.isfile(os.path.join(model_dir, "coupled_experiment.json")):
+            plot_cmd.extend([
+                "--reference-label",
+                "MATLAB closed-loop reference",
+                "--output-label",
+                "Python coupled FMU co-simulation",
+                "--comparison-title",
+                "Closed-loop reference vs coupled FMU co-simulation",
+            ])
+
         plot = subprocess.run(
-            [
-                sys.executable,
-                plot_py,
-                os.path.abspath(ref_csv),
-                os.path.abspath(results_csv),
-                "--title",
-                name,
-                "--output",
-                model_plots,
-            ],
+            plot_cmd,
             capture_output=True,
             text=True,
         )
