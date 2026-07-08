@@ -58,18 +58,22 @@ jobs:
           name: matlab-outputs
           path: experiments
 
-      - name: Show structure after download (debug)
+      - name: Install Python dependencies
+        run: |
+          python -m pip install --upgrade pip
+          python -m pip install fmpy networkx matplotlib dtaidistance
+
+      - name: Generate experiment JSON files
+        run: |
+          python generate_experiment_json.py --experiments experiments --overwrite
+
+      - name: Show structure after JSON generation (debug)
         run: |
           echo "=== experiments tree ==="
           dir /s /b experiments\*.fmu
           dir /s /b experiments\*.json
           dir /s /b experiments\*_ref.csv
         shell: cmd
-
-      - name: Install Python dependencies
-        run: |
-          python -m pip install --upgrade pip
-          python -m pip install fmpy networkx matplotlib dtaidistance
 
       - name: Run all experiments
         run: |
@@ -89,6 +93,7 @@ jobs:
         with:
           name: result-csvs
           path: |
+            experiments/**/*.json
             experiments/**/results_*.csv
             experiments/**/metrics_*.csv
           retention-days: 30
