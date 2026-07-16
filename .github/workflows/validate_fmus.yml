@@ -63,6 +63,10 @@ jobs:
           python -m pip install --upgrade pip
           python -m pip install fmpy networkx matplotlib dtaidistance
 
+      - name: Generate FMU metadata report
+        run: |
+          python generate_fmu_metadata_report.py --experiments experiments --out fmu_metadata_report.csv
+
       - name: Generate experiment JSON files
         run: |
           python generate_experiment_json.py --experiments experiments --overwrite
@@ -77,7 +81,7 @@ jobs:
 
       - name: Run all experiments
         run: |
-          python run_all_experiments.py --experiments experiments --tol 0.01 --plots-dir plots
+          python run_all_experiments.py --experiments experiments --tol 0.01 --plots-dir plots --summary-csv validation_summary.csv
 
       - name: Upload plots
         uses: actions/upload-artifact@v4
@@ -93,6 +97,8 @@ jobs:
         with:
           name: result-csvs
           path: |
+            fmu_metadata_report.csv
+            validation_summary.csv
             experiments/**/*.json
             experiments/**/results_*.csv
             experiments/**/metrics_*.csv
