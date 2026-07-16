@@ -1,0 +1,11 @@
+{
+  "type": "coupled",
+  "name": "pendulum_closed_loop",
+  "description": "Closed-loop validation for a nonlinear pendulum plant: controller FMU and plant FMU coupled by generic.py and compared with a monolithic Simulink reference.",
+  "reference_model": "Pendulum_ClosedLoop_Reference",
+  "fmu_models": [
+    "Pendulum_Controller",
+    "Pendulum_Plant"
+  ],
+  "category_reason": "The plant contains the nonlinear sin(theta) term."
+}
